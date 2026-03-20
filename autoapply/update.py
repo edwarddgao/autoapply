@@ -19,7 +19,7 @@ from .db import DB_PATH
 
 log = logging.getLogger("autoapply.update")
 
-GITHUB_REPO = "edwarddgao/openapply"
+GITHUB_REPO = "edwarddgao/jobsdb"
 GITHUB_API = "https://api.github.com"
 
 

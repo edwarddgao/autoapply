@@ -74,15 +74,6 @@ CREATE TABLE IF NOT EXISTS exclusions (
     excluded_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS department_categories (
-    department TEXT PRIMARY KEY,
-    category TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS role_categories (
-    normalized_title TEXT PRIMARY KEY,
-    role TEXT NOT NULL
-);
 """
 
 
@@ -174,28 +165,3 @@ def attached_local(conn: sqlite3.Connection, db_path: Path | None = None):
     finally:
         conn.execute("DETACH DATABASE local")
 
-
-def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
-    row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
-    return row["value"] if row else None
-
-
-def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
-    conn.execute(
-        "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
-        (key, value),
-    )
-    conn.commit()
-
-
-def load_department_categories(conn: sqlite3.Connection, mapping: dict[str, str]) -> int:
-    """Load department→category mapping into local.department_categories.
-
-    Returns number of rows inserted.
-    """
-    conn.executemany(
-        "INSERT OR REPLACE INTO department_categories (department, category) VALUES (?, ?)",
-        mapping.items(),
-    )
-    conn.commit()
-    return len(mapping)

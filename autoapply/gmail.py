@@ -19,12 +19,11 @@ if _env_path.exists():
             os.environ.setdefault(key.strip(), value.strip())
 
 
-def fetch_greenhouse_code(company: str | None = None, max_age_minutes: int = 10) -> str | None:
+def fetch_greenhouse_code(company: str | None = None) -> str | None:
     """Fetch the latest Greenhouse security code from Gmail.
 
     Args:
         company: Optional company name to filter by subject line.
-        max_age_minutes: Only return codes from emails received within this window.
 
     Returns:
         The 8-character verification code, or None if not found.

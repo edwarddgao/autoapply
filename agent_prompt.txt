@@ -71,7 +71,7 @@ For each page/step of the application:
 Before filling any essay field, query the application count:
 
 ```bash
-sqlite3 /Users/edwarddgao/openapply/local.db "SELECT COUNT(*) FROM applications"
+sqlite3 /Users/edwarddgao/autoapply/local.db "SELECT COUNT(*) FROM applications"
 ```
 
 Then for ALL required essay/open-ended fields, use this response (replacing N with the count):
@@ -88,7 +88,7 @@ Do NOT write custom answers from the resume or any other source. Just paste the 
 - **FILE UPLOADS:** You CANNOT interact with native OS file pickers. Resume/cover letter uploads MUST be handled by Simplify's autofill. If Simplify fails to upload the resume and the Resume/CV field shows "Attach" buttons instead of a filename, report STATUS: BLOCKED immediately. Do NOT waste time trying to click Attach or use workarounds.
 - **EMAIL VERIFICATION:** Some ATS platforms (Greenhouse) require a verification code sent via email. Run this command to fetch the latest code:
   ```bash
-  python -m openapply.gmail "COMPANY_NAME"
+  python -m autoapply.gmail "COMPANY_NAME"
   ```
   Replace COMPANY_NAME with the company name from the job page. The script prints the 8-character code. Enter it on the page and resubmit. If it prints nothing, wait 10 seconds and try again.
 
@@ -121,7 +121,7 @@ Do NOT write custom answers from the resume or any other source. Just paste the 
 - **EU Greenhouse**: scroll to "Apply for this job" BEFORE autofill.
 - **Large dropdowns (3000+ options)**: use JS to set value.
 - **reCAPTCHA**: NOT a blocker. v3 passes automatically. Solve visual challenges if they appear.
-- **Greenhouse email verification**: run `python -m openapply.gmail "COMPANY"` to fetch the code.
+- **Greenhouse email verification**: run `python -m autoapply.gmail "COMPANY"` to fetch the code.
 
 ### Extension disconnection
 Do NOT restart Chrome or call tabs_context_mcp.

@@ -19,7 +19,7 @@ Local machine
 ## Running
 
 ```bash
-env -u CLAUDECODE python -m autoapply.pipeline                  # 4 concurrent (default)
+env -u CLAUDECODE python -m autoapply.pipeline                  # 8 concurrent (default)
 env -u CLAUDECODE python -m autoapply.pipeline --concurrency 1
 ```
 
@@ -29,7 +29,7 @@ If run from inside Claude Code, prefix with `env -u CLAUDECODE`.
 
 ### Package (`autoapply/`)
 - `pipeline.py` — orchestrator: creates tabs, spawns agents, marks results
-- `search.py` — `find_candidates()`, `mark_applied()`, `mark_excluded()`, `delete_job()`
+- `search.py` — `find_candidates()`, `mark_applied()`, `mark_excluded()`
 - `filter.py` — rebuilds `candidates` table from `filter.sql` WHERE clause
 - `db.py` — schema, connections, helpers. Two databases: `jobs.db` (scraped) + `local.db` (applications/exclusions)
 - `update.py` — downloads `jobs.db` from GitHub Releases
@@ -52,7 +52,7 @@ If run from inside Claude Code, prefix with `env -u CLAUDECODE`.
 
 ### `local.db` (persistent, never overwrite)
 - `applications` — submitted jobs
-- `exclusions` — permanently excluded jobs (3+ failures)
+- `exclusions` — failed jobs (excluded on first failure)
 
 ### Candidate filtering
 Edit `filter.sql` then run `python -m autoapply.filter` to rebuild. The WHERE clause filters directly on job title keywords, location, seniority, etc. Excludes jobs already in `local.db` applications/exclusions.
@@ -60,13 +60,12 @@ Edit `filter.sql` then run `python -m autoapply.filter` to rebuild. The WHERE cl
 ## Tracking
 
 - **SUBMITTED** → `mark_applied(job_id)` in `local.db`
-- **FAILED** → retried in next pipeline run (not recorded)
-- **3+ failures** → `mark_excluded(job_id, reason)` — permanently excluded
+- **FAILED** → `mark_excluded(job_id, reason)` in `local.db`
 
 ## Pipeline Details
 
 ### Error handling
-- 3+ errors within 60s → stop (Chrome likely crashed), attempt Chrome restart
+- 24+ errors within 60s → stop (Chrome likely crashed), attempt Chrome restart
 - Per-job timeout: 600s
 - DB is the only state — restart script to resume
 

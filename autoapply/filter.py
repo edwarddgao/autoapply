@@ -5,13 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from .db import (
-    DB_PATH,
-    attached_local,
-    get_connection,
-    init_db,
-    init_local_db,
-)
+from .db import DB_PATH, attached_local, get_connection, init_local_db
 
 FILTER_PATH = Path(__file__).parent.parent / "filter.sql"
 
@@ -23,30 +17,20 @@ SELECT_COLS = """
 """
 
 
-def rebuild_candidates(
-    db_path: Path | None = None,
-    filter_path: Path | None = None,
-    local_db_path: Path | None = None,
-) -> int:
+def rebuild_candidates() -> int:
     """Rebuild the candidates table using the WHERE clause from filter.sql.
 
     Returns the number of candidates.
     """
-    fp = filter_path or FILTER_PATH
-    if not fp.exists():
-        raise FileNotFoundError(f"{fp} not found.")
-
-    where = fp.read_text().strip()
+    where = FILTER_PATH.read_text().strip()
     if not where:
         raise ValueError("filter.sql is empty.")
 
-    path = db_path or DB_PATH
-    init_db(path)
-    init_local_db(local_db_path)
+    init_local_db()
 
-    conn = get_connection(path)
+    conn = get_connection()
     try:
-        with attached_local(conn, local_db_path):
+        with attached_local(conn):
             conn.execute("DROP TABLE IF EXISTS candidates_new")
             conn.execute(f"""
                 CREATE TABLE candidates_new AS
@@ -73,15 +57,8 @@ def rebuild_candidates(
 
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Rebuild candidates table from filter.sql")
-    parser.add_argument("--db", type=Path, default=None, help="Path to jobs.db")
-    parser.add_argument("--filter", type=Path, default=None, help="Path to filter.sql")
-    args = parser.parse_args()
-
     try:
-        rebuild_candidates(db_path=args.db, filter_path=args.filter)
+        rebuild_candidates()
     except (FileNotFoundError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)

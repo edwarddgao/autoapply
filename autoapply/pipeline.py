@@ -1,7 +1,7 @@
 """Automated job application orchestrator.
 
 Usage:
-    python -m autoapply.pipeline                  # 1 concurrent (default)
+    python -m autoapply.pipeline                  # 8 concurrent (default)
     python -m autoapply.pipeline --concurrency 4
 """
 
@@ -22,7 +22,6 @@ from .filter import rebuild_candidates
 from .search import find_candidates, mark_applied, mark_excluded
 from .update import download_db
 
-MAX_FAILURES = 3
 
 LOGS_DIR = Path(__file__).parent.parent / "logs"
 PIPELINE_LOG = LOGS_DIR / "pipeline.log"
@@ -45,6 +44,7 @@ APPLICATION_SCHEMA = json.dumps({
     "type": "object",
     "properties": {
         "submitted": {"type": "boolean"},
+        "reason": {"type": "string"},
     },
     "required": ["submitted"],
 })
@@ -68,7 +68,8 @@ def parse_stream_log(log_path: Path) -> tuple[str, str, float]:
     if structured_output and structured_output.get("submitted"):
         return "submitted", "", cost
 
-    return "error", "Not submitted", cost
+    reason = (structured_output or {}).get("reason", "unknown")
+    return "error", reason, cost
 
 
 def close_extra_tabs() -> None:
@@ -196,10 +197,8 @@ async def worker(
     tab_id: int,
     job_queue: asyncio.Queue,
     results: dict,
-    cost: list[float],
     recent_errors: list[float],
     stop_event: asyncio.Event,
-    failure_counts: dict[str, int],
 ):
     """Pull jobs from queue, apply, mark result, repeat."""
 
@@ -216,31 +215,20 @@ async def worker(
         except Exception as e:
             status, reason, job_cost = "error", str(e), 0.0
 
-        cost[0] += job_cost
+        results["cost"] += job_cost
 
-        try:
-            if status == "submitted":
-                mark_applied(job["job_id"])
-                results["submitted"] += 1
-            else:
-                jid = job["job_id"]
-                failure_counts[jid] = failure_counts.get(jid, 0) + 1
-                if failure_counts[jid] >= MAX_FAILURES:
-                    mark_excluded(jid, reason, job["company_name"], job["title"], job["apply_url"])
-                    results["excluded"] += 1
-                    log(f"  [{worker_id}] Excluded after {MAX_FAILURES} failures: {job['title']}")
-                else:
-                    results["error"] += 1
-                recent_errors.append(time.time())
-        except Exception as e:
-            log(f"  [{worker_id}] DB error: {e}")
-            results["error"] += 1
-
-        cutoff = time.time() - 60
-        recent_errors[:] = [t for t in recent_errors if t > cutoff]
-        if len(recent_errors) >= 24:
-            log(f"\n  !!! {len(recent_errors)} errors in last 60s — Chrome likely crashed.")
-            stop_event.set()
+        if status == "submitted":
+            mark_applied(job["job_id"])
+            results["submitted"] += 1
+        else:
+            mark_excluded(job["job_id"], reason)
+            results["excluded"] += 1
+            now = time.time()
+            recent_errors.append(now)
+            recent_errors[:] = [t for t in recent_errors if t > now - 60]
+            if len(recent_errors) >= 24:
+                log(f"\n  !!! {len(recent_errors)} errors in last 60s — Chrome likely crashed.")
+                stop_event.set()
 
         sym = "+" if status == "submitted" else "!"
         log(
@@ -275,40 +263,37 @@ async def main() -> None:
     tab_ids = create_tabs(args.concurrency)
     log(f"Tabs: {tab_ids}")
 
-    results: dict = {"submitted": 0, "excluded": 0, "error": 0}
-    cost = [0.0]
+    results: dict = {"submitted": 0, "excluded": 0, "cost": 0.0}
     recent_errors: list[float] = []
-    failure_counts: dict[str, int] = {}
     stop_event = asyncio.Event()
 
     def on_sigint(sig, frame):
-        log(f"\n\nInterrupted. {json.dumps(results)}, cost=${cost[0]:.2f}")
+        log(f"\n\nInterrupted. {json.dumps(results)}")
         sys.exit(0)
     signal.signal(signal.SIGINT, on_sigint)
 
-    while True:
-        candidates = find_candidates(limit=max(20, args.concurrency * 5))
-        if not candidates:
-            log("No more candidates in database.")
-            break
+    candidates = find_candidates()
+    if not candidates:
+        log("No candidates in database.")
+        return
 
-        job_queue: asyncio.Queue = asyncio.Queue()
-        for c in candidates:
-            job_queue.put_nowait(c)
+    job_queue: asyncio.Queue = asyncio.Queue()
+    for c in candidates:
+        job_queue.put_nowait(c)
 
-        log(f"\nProcessing {job_queue.qsize()} jobs (concurrency={args.concurrency})")
-        log(f"Progress: {results['submitted']} submitted, cost=${cost[0]:.2f}")
+    log(f"\nProcessing {job_queue.qsize()} jobs (concurrency={args.concurrency})")
 
+    while not job_queue.empty() and not stop_event.is_set():
         workers = [
             asyncio.create_task(
-                worker(i, tab_ids[i], job_queue, results, cost,
-                       recent_errors, stop_event, failure_counts)
+                worker(i, tab_ids[i], job_queue, results,
+                       recent_errors, stop_event)
             )
             for i in range(min(args.concurrency, len(tab_ids)))
         ]
         await asyncio.gather(*workers)
 
-        log(f"\n--- Progress: {json.dumps(results)}, cost=${cost[0]:.2f} ---")
+        log(f"\n--- Progress: {json.dumps(results)} ---")
 
         if stop_event.is_set():
             restart_chrome()
@@ -318,10 +303,7 @@ async def main() -> None:
             tab_ids = create_tabs(args.concurrency)
             log(f"Fresh tabs: {tab_ids}")
 
-    log(f"\n{'='*60}")
-    log(f"FINAL: {json.dumps(results, indent=2)}")
-    log(f"Total cost: ${cost[0]:.2f}")
-    log(f"{'='*60}")
+    log(f"\nFINAL: {json.dumps(results)}")
 
 
 if __name__ == "__main__":

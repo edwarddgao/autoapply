@@ -40,13 +40,28 @@ CHILD_ENV["MAX_THINKING_TOKENS"] = "0"
 JOB_TIMEOUT = 600
 
 
+def _chrome_memory_mb() -> int:
+    """Return total Chrome RSS in MB."""
+    try:
+        out = subprocess.run(
+            ["ps", "aux"], capture_output=True, text=True, timeout=5
+        ).stdout
+        return sum(
+            int(line.split()[5])
+            for line in out.splitlines()
+            if "Google Chrome" in line
+        ) // 1024
+    except Exception:
+        return -1
+
+
 APPLICATION_SCHEMA = json.dumps({
     "type": "object",
     "properties": {
         "submitted": {"type": "boolean"},
         "reason": {"type": "string"},
     },
-    "required": ["submitted"],
+    "required": ["submitted", "reason"],
 })
 
 
@@ -88,26 +103,25 @@ TAB_SCHEMA = json.dumps({
 })
 
 
-def restart_chrome(timeout: int = 60) -> None:
-    """Kill and relaunch Chrome, poll until extension responds."""
+def restart_chrome(timeout: int = 90) -> None:
+    """Force-kill and relaunch Chrome, poll until extension responds."""
     log("Restarting Chrome...")
-    subprocess.run(
-        ["osascript", "-e", 'quit app "Google Chrome"'],
-        capture_output=True,
-    )
-    time.sleep(3)
+    subprocess.run(["pkill", "-9", "-f", "Google Chrome"], capture_output=True)
+    time.sleep(5)
     subprocess.run(["open", "-a", "Google Chrome"], capture_output=True)
+    time.sleep(15)
 
     deadline = time.time() + timeout
     while time.time() < deadline:
         time.sleep(5)
         try:
             result = subprocess.run(
-                ["claude", "-p", "Call tabs_context_mcp with createIfEmpty=true.",
-                 "--chrome", "--max-turns", "3", "--dangerously-skip-permissions"],
+                ["claude", "-p", "Call tabs_context_mcp with createIfEmpty=true. Reply CONNECTED if successful.",
+                 "--chrome", "--output-format", "json",
+                 "--max-turns", "3", "--dangerously-skip-permissions"],
                 capture_output=True, text=True, env=CHILD_ENV, timeout=30,
             )
-            if result.returncode == 0:
+            if result.returncode == 0 and "CONNECTED" in result.stdout:
                 log("Chrome extension reconnected")
                 return
         except subprocess.TimeoutExpired:
@@ -115,7 +129,7 @@ def restart_chrome(timeout: int = 60) -> None:
     log("Chrome extension did not reconnect within timeout")
 
 
-def create_tabs(n: int, retries: int = 3) -> list[int]:
+def create_tabs(n: int, retries: int = 5) -> list[int]:
     """One-shot claude -p to create browser tabs, with retries and Chrome restart."""
     prompt = (
         f"Call tabs_context_mcp with createIfEmpty=true. "
@@ -136,13 +150,15 @@ def create_tabs(n: int, retries: int = 3) -> list[int]:
                 capture_output=True, text=True, env=CHILD_ENV, timeout=120,
             )
             data = json.loads(result.stdout)
-            tab_ids = data.get("structured_output", {}).get("tab_ids", [])
+            structured = data.get("structured_output", {})
+            tab_ids = structured.get("tab_ids", [])
             unique_ids = list(dict.fromkeys(tab_ids))
             if unique_ids:
                 log(f"create_tabs: {unique_ids}")
                 return unique_ids
-        except (json.JSONDecodeError, TypeError, subprocess.TimeoutExpired):
-            pass
+            log(f"create_tabs: no tab IDs in structured_output: {structured}")
+        except (json.JSONDecodeError, TypeError, subprocess.TimeoutExpired) as e:
+            log(f"create_tabs: parse error: {e}")
     stdout = result.stdout[:500] if result else "N/A"
     stderr = result.stderr[:500] if result else "N/A"
     log(f"FATAL: Failed to create tabs after {retries} attempts.\nstdout: {stdout}\nstderr: {stderr}")
@@ -183,7 +199,8 @@ async def apply_to_job(job: dict, tab_id: int) -> tuple[str, str, float]:
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
-            return "timeout", f"Timeout ({JOB_TIMEOUT}s)", 0.0
+            mem = _chrome_memory_mb()
+            return "timeout", f"Timeout ({JOB_TIMEOUT}s) chrome_mem={mem}MB", 0.0
 
     if proc.returncode != 0 and not log_path.stat().st_size:
         err = stderr.decode("utf-8", errors="replace")[:200] if stderr else "unknown"
@@ -220,14 +237,14 @@ async def worker(
         if status == "submitted":
             mark_applied(job["job_id"])
             results["submitted"] += 1
+            recent_errors.clear()
         else:
             mark_excluded(job["job_id"], reason)
             results["excluded"] += 1
-            now = time.time()
-            recent_errors.append(now)
-            recent_errors[:] = [t for t in recent_errors if t > now - 60]
-            if len(recent_errors) >= 24:
-                log(f"\n  !!! {len(recent_errors)} errors in last 60s — Chrome likely crashed.")
+            recent_errors.append(time.time())
+            if len(recent_errors) >= stop_event.threshold:
+                chrome_mem = _chrome_memory_mb()
+                log(f"\n  !!! {len(recent_errors)} consecutive errors — Chrome likely crashed. (chrome_mem={chrome_mem}MB)")
                 stop_event.set()
 
         sym = "+" if status == "submitted" else "!"
@@ -266,11 +283,13 @@ async def main() -> None:
     results: dict = {"submitted": 0, "excluded": 0, "cost": 0.0}
     recent_errors: list[float] = []
     stop_event = asyncio.Event()
+    stop_event.threshold = args.concurrency
 
-    def on_sigint(sig, frame):
-        log(f"\n\nInterrupted. {json.dumps(results)}")
-        sys.exit(0)
-    signal.signal(signal.SIGINT, on_sigint)
+    def cleanup(sig=None, frame=None):
+        log(f"\n\nStopping. {json.dumps(results)}")
+        os.killpg(os.getpid(), signal.SIGKILL)
+    signal.signal(signal.SIGINT, cleanup)
+    signal.signal(signal.SIGTERM, cleanup)
 
     candidates = find_candidates()
     if not candidates:
@@ -283,7 +302,7 @@ async def main() -> None:
 
     log(f"\nProcessing {job_queue.qsize()} jobs (concurrency={args.concurrency})")
 
-    while not job_queue.empty() and not stop_event.is_set():
+    while not job_queue.empty():
         workers = [
             asyncio.create_task(
                 worker(i, tab_ids[i], job_queue, results,
@@ -307,6 +326,7 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    os.setpgrp()
     try:
         asyncio.run(main())
     except Exception as e:

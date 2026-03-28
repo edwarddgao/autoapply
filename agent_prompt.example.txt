@@ -26,6 +26,8 @@ Skills: Python, TypeScript, Java, SQL | React, FastAPI, Spring Boot | Git, Docke
 
 - Work auth (US): Yes/No.
 - Sponsorship (US): Yes/No.
+- Work auth (Canada): Yes/No.
+- Sponsorship (Canada): Yes/No.
 - GPA: X.X
 - Earliest start date: As soon as possible / Immediately
 - Graduation date: Month Year
@@ -42,35 +44,32 @@ Skills: Python, TypeScript, Java, SQL | React, FastAPI, Spring Boot | Git, Docke
 - Years of experience: 0-3 / Entry Level
 - GitHub username: yourprofile
 - BrightHire consent / data retention / background check: Yes
+- Non-compete: No (length: 0 months)
+- Personal project: https://yourproject.com
 
 ## Workflow
 
 ### Application Form
 
+**IMPORTANT: Never use the `computer` tool with action "screenshot". Use `read_page` to see page state and `find` to locate elements. Use `form_input` for text fields and `computer` with action "left_click" for buttons/dropdowns. Screenshots waste bandwidth and cause Chrome instability.**
+
 For each page/step of the application:
 
-1. Screenshot to see current state
-2. **FIRST CHECK:** If the Simplify panel shows "You applied to this job on [date]", report STATUS: ALREADY_APPLIED immediately and stop. Do not fill any fields.
-3. Click the Simplify green "S" icon (top-right), then "Autofill this page", wait for "Autofill complete!"
+1. `read_page` to see current state
+2. Click the Simplify green "S" icon (top-right), then "Autofill this page", wait for "Autofill complete!"
 4. Close Simplify panel (click X)
 5. Scroll straight to the Next/Submit button and click it — do NOT review fields along the way
 6. If the page advances → great, repeat from step 1 on the new page
 7. If an **error banner** appears (Ashby: "Your form needs corrections" listing field names; Lever/Greenhouse: inline red highlights), scroll/click to each missing field, fill it, then click Next/Submit again
 8. Repeat until all steps are done
 
-**Key principle:** Let the form's validation tell you what's missing. Never screenshot-and-scroll to review fields. Autofill → Submit → fix only what errors report.
+**Key principle:** Let the form's validation tell you what's missing. Never scroll to review fields. Autofill → Submit → fix only what errors report.
 
 ## Essay / Open-Ended Questions
 
-Before filling any essay field, query the application count:
+For ALL required essay/open-ended fields, use this response:
 
-```bash
-sqlite3 jobs.db "SELECT COUNT(*) FROM applications"
-```
-
-Then for ALL required essay/open-ended fields, use a short default response. Customize this to whatever you want — for example:
-
-`I'm excited about this opportunity and would love to discuss how my skills align with this role. Please feel free to reach out at you@example.com.`
+`Your default essay response here. Keep it short — 1-2 sentences.`
 
 Do NOT write custom answers from the resume or any other source. Just paste the default and move on. Skip optional essay fields entirely.
 
